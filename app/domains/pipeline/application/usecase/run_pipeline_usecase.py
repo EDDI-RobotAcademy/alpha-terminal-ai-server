@@ -79,7 +79,7 @@ class RunPipelineUseCase:
                     symbol=symbol,
                     name=name,
                     summary=best_analysis.summary,
-                    tags=[t.model_dump() for t in best_analysis.tags],
+                    tags=[t.label for t in best_analysis.tags],
                     sentiment=best_analysis.sentiment,
                     sentiment_score=best_analysis.sentiment_score,
                     confidence=best_analysis.confidence,
