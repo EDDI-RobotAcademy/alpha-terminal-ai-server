@@ -40,3 +40,12 @@ class RawArticleRepositoryImpl(RawArticleRepositoryPort):
             query = query.filter(RawArticleORM.source_type == source_type)
         query = query.order_by(RawArticleORM.created_at.desc())
         return [RawArticleMapper.to_entity(orm) for orm in query.all()]
+
+    def migrate_symbol(self, old_symbol: str, new_symbol: str) -> int:
+        count = (
+            self._db.query(RawArticleORM)
+            .filter(RawArticleORM.symbol == old_symbol)
+            .update({"symbol": new_symbol})
+        )
+        self._db.commit()
+        return count

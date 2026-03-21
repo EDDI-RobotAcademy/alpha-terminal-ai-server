@@ -1,3 +1,5 @@
+import logging
+import re
 from datetime import datetime
 from hashlib import sha256
 from typing import List
@@ -8,22 +10,59 @@ from app.domains.stock_collector.application.usecase.collector_port import Colle
 from app.domains.stock_collector.domain.entity.raw_article import RawArticle
 from app.infrastructure.config.settings import get_settings
 
+logger = logging.getLogger(__name__)
+
 SYMBOL_TO_NAME = {
     "005930": "삼성전자",
     "000660": "SK하이닉스",
     "035420": "네이버",
     "035720": "카카오",
     "373220": "LG에너지솔루션",
+    "005380": "현대자동차",
+    "000270": "기아",
+    "051910": "LG화학",
+    "006400": "삼성SDI",
+    "068270": "셀트리온",
 }
+
+SYMBOL_TO_ENGLISH = {
+    "005930": "Samsung Electronics",
+    "000660": "SK Hynix",
+    "035420": "NAVER",
+    "035720": "Kakao",
+    "373220": "LG Energy Solution",
+    "005380": "Hyundai Motor",
+    "000270": "Kia",
+    "051910": "LG Chem",
+    "006400": "Samsung SDI",
+    "068270": "Celltrion",
+}
+
+_STOCK_CODE_PATTERN = re.compile(r"^\d{6}$|^[A-Z]{1,5}(\.B)?$")
 
 
 class NewsCollectorAdapter(CollectorPort):
     SERP_API_URL = "https://serpapi.com/search"
 
     def collect(self, symbol: str) -> List[RawArticle]:
-        settings = get_settings()
-        keyword = SYMBOL_TO_NAME.get(symbol, symbol)
+        if not _STOCK_CODE_PATTERN.match(symbol):
+            logger.warning(f"[NewsCollector] symbol이 코드 형식이 아닙니다: '{symbol}' — 수집을 건너뜁니다.")
+            return []
 
+        settings = get_settings()
+        korean_keyword = SYMBOL_TO_NAME.get(symbol, symbol)
+
+        articles = self._fetch(symbol, korean_keyword, settings)
+
+        if not articles and korean_keyword != symbol:
+            english_keyword = SYMBOL_TO_ENGLISH.get(symbol)
+            if english_keyword:
+                logger.debug(f"[NewsCollector] 한글 검색 결과 없음, 영문 fallback: '{english_keyword}'")
+                articles = self._fetch(symbol, english_keyword, settings)
+
+        return articles
+
+    def _fetch(self, symbol: str, keyword: str, settings) -> List[RawArticle]:
         params = {
             "engine": "google_news",
             "q": keyword,
@@ -35,7 +74,8 @@ class NewsCollectorAdapter(CollectorPort):
             response = httpx.get(self.SERP_API_URL, params=params, timeout=10.0)
             response.raise_for_status()
             data = response.json()
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
+            logger.warning(f"[NewsCollector] SerpAPI 요청 실패: {e}")
             return []
 
         articles = []
