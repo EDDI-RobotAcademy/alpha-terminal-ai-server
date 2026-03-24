@@ -408,3 +408,6 @@ pyrightconfig.json
 
 # exclude .DS_Store
 .DS_Store
+
+# Claude Code personal tools (not shared with team)
+.claude/

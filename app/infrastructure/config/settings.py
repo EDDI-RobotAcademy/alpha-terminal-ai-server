@@ -13,11 +13,15 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_password: str = ""
     auth_password: str = ""
+    auth_secret: str = ""
     kakao_client_id: str = ""
+    kakao_client_secret: str = ""
     kakao_redirect_uri: str = ""
     serp_api_key: str = ""
     dart_api_key: str = ""
     openai_api_key: str = ""
+    cors_allowed_frontend_url: str = "http://localhost:3000"
+    frontend_auth_callback_url: str = "http://localhost:3000/auth-callback"
     debug: bool = False
 
     model_config = {
