@@ -1,6 +1,10 @@
-from typing import List, Optional
+import asyncio
+import json
+from datetime import datetime, timezone
+from typing import AsyncGenerator, List, Optional
 
-from fastapi import APIRouter, Cookie, Depends
+from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.domains.pipeline.adapter.outbound.persistence.analysis_log_repository_impl import AnalysisLogRepositoryImpl
@@ -36,19 +40,8 @@ async def run_pipeline(
     account_id: Optional[str] = Cookie(default=None),
 ):
     parsed_account_id = int(account_id) if account_id else None
-    usecase = RunPipelineUseCase(
-        watchlist_repository=WatchlistRepositoryImpl(db),
-        raw_article_repository=RawArticleRepositoryImpl(db),
-        collectors=[DartCollectorAdapter(), NewsCollectorAdapter(), FinnhubCollectorAdapter(), NaverNewsCollectorAdapter()],
-        normalize_usecase=NormalizeRawArticleUseCase(normalized_article_repository),
-        analysis_usecase=GetOrCreateAnalysisUseCase(
-            article_repository=normalized_article_repository,
-            analysis_repository=_analysis_repository,
-            analyzer_port=OpenAIAnalyzerAdapter(api_key=_settings.openai_api_key),
-        ),
-    )
     selected_symbols = request.symbols if request and request.symbols else None
-    result = await usecase.execute(selected_symbols=selected_symbols, account_id=parsed_account_id)
+    result = await _build_usecase(db).execute(selected_symbols=selected_symbols, account_id=parsed_account_id)
 
     if parsed_account_id not in _summary_registry:
         _summary_registry[parsed_account_id] = {}
@@ -59,6 +52,75 @@ async def run_pipeline(
     log_repo.save_all(result.get("logs", []), account_id=parsed_account_id)
 
     return {"message": result["message"], "processed": result["processed"]}
+
+
+def _build_usecase(db: Session) -> RunPipelineUseCase:
+    return RunPipelineUseCase(
+        watchlist_repository=WatchlistRepositoryImpl(db),
+        raw_article_repository=RawArticleRepositoryImpl(db),
+        collectors=[DartCollectorAdapter(), NewsCollectorAdapter(), FinnhubCollectorAdapter(), NaverNewsCollectorAdapter()],
+        normalize_usecase=NormalizeRawArticleUseCase(normalized_article_repository),
+        analysis_usecase=GetOrCreateAnalysisUseCase(
+            article_repository=normalized_article_repository,
+            analysis_repository=_analysis_repository,
+            analyzer_port=OpenAIAnalyzerAdapter(api_key=_settings.openai_api_key),
+        ),
+    )
+
+
+@router.post("/run-stream")
+async def run_pipeline_stream(
+    request: RunPipelineRequest | None = None,
+    db: Session = Depends(get_db),
+    account_id: Optional[str] = Cookie(default=None),
+):
+    if account_id is None:
+        return Response(status_code=401)
+
+    parsed_account_id = int(account_id)
+    selected_symbols = request.symbols if request and request.symbols else None
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+
+        async def on_event(event: dict) -> None:
+            await queue.put(event)
+
+        async def run():
+            try:
+                result = await _build_usecase(db).execute(
+                    selected_symbols=selected_symbols,
+                    account_id=parsed_account_id,
+                    on_event=on_event,
+                )
+                if parsed_account_id not in _summary_registry:
+                    _summary_registry[parsed_account_id] = {}
+                for summary in result["summaries"]:
+                    _summary_registry[parsed_account_id][summary.symbol] = summary
+                log_repo = AnalysisLogRepositoryImpl(db)
+                log_repo.save_all(result.get("logs", []), account_id=parsed_account_id)
+                await queue.put({
+                    "type": "done",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "message": result["message"],
+                    "processed": result["processed"],
+                })
+            except Exception as e:
+                await queue.put({"type": "error", "at": datetime.now(timezone.utc).isoformat(), "message": str(e)})
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run())
+
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        await task
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/summaries", response_model=List[StockSummaryResponse])

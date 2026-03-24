@@ -1,7 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Awaitable, Callable, Optional
 
+from app.domains.pipeline.application.response.analysis_log_response import AnalysisLogResponse
 from app.domains.pipeline.application.response.stock_summary_response import StockSummaryResponse
 from app.domains.stock_analyzer.application.usecase.get_or_create_analysis_usecase import GetOrCreateAnalysisUseCase
 from app.domains.stock_collector.application.usecase.collect_articles_usecase import CollectArticlesUseCase
@@ -9,6 +11,17 @@ from app.domains.stock_normalizer.application.request.normalize_raw_article_requ
 from app.domains.stock_normalizer.application.usecase.normalize_raw_article_usecase import NormalizeRawArticleUseCase
 
 logger = logging.getLogger(__name__)
+
+OnEvent = Callable[[dict], Awaitable[None]]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _emit(on_event: Optional[OnEvent], event: dict) -> None:
+    if on_event:
+        await on_event(event)
 
 
 class RunPipelineUseCase:
@@ -26,29 +39,75 @@ class RunPipelineUseCase:
         self._normalize_usecase = normalize_usecase
         self._analysis_usecase = analysis_usecase
 
-    async def execute(self) -> dict:
-        watchlist_items = self._watchlist_repository.find_all()
+    async def execute(
+        self,
+        selected_symbols: Optional[list[str]] = None,
+        account_id: Optional[int] = None,
+        on_event: Optional[OnEvent] = None,
+    ) -> dict:
+        watchlist_items = self._watchlist_repository.find_all(account_id=account_id)
         if not watchlist_items:
-            return {"message": "관심종목이 없습니다.", "processed": [], "summaries": []}
+            return {"message": "관심종목이 없습니다.", "processed": [], "summaries": [], "logs": []}
+
+        if selected_symbols:
+            selected_set = {symbol.upper() for symbol in selected_symbols}
+            watchlist_items = [item for item in watchlist_items if item.symbol.upper() in selected_set]
+            if not watchlist_items:
+                return {"message": "선택한 관심종목이 없습니다.", "processed": [], "summaries": [], "logs": []}
 
         results = []
         summaries = []
+        logs = []
 
-        for item in watchlist_items:
+        total = len(watchlist_items)
+        for idx, item in enumerate(watchlist_items, 1):
             symbol = item.symbol
             name = item.name
+
+            await _emit(on_event, {
+                "type": "progress",
+                "phase": "COLLECT",
+                "symbol": symbol,
+                "at": _now(),
+                "message": f"[{idx}/{total}] {name}({symbol}) 뉴스 수집 중…",
+                "progress": {"current": idx, "total": total},
+            })
 
             collect_usecase = CollectArticlesUseCase(self._raw_article_repository, self._collectors)
             await asyncio.to_thread(collect_usecase.execute, symbol)
 
             raw_articles = self._raw_article_repository.find_all(symbol=symbol)
             if not raw_articles:
+                await _emit(on_event, {
+                    "type": "progress",
+                    "phase": "COLLECT",
+                    "symbol": symbol,
+                    "at": _now(),
+                    "message": f"{name}({symbol}) 수집된 기사 없음 — 건너뜀",
+                })
                 results.append({"symbol": symbol, "skipped": True, "reason": "수집된 기사 없음"})
                 continue
+
+            await _emit(on_event, {
+                "type": "progress",
+                "phase": "COLLECT",
+                "symbol": symbol,
+                "at": _now(),
+                "message": f"{name}({symbol}) 기사 {len(raw_articles)}건 수집 완료",
+            })
 
             best_analysis = None
             for raw in raw_articles[:3]:
                 try:
+                    await _emit(on_event, {
+                        "type": "progress",
+                        "phase": "NORMALIZE",
+                        "symbol": symbol,
+                        "source": raw.source_name,
+                        "at": _now(),
+                        "message": f"{name}({symbol}) 기사 정규화 중… [{raw.source_name}]",
+                    })
+
                     try:
                         published_at = datetime.fromisoformat(str(raw.published_at))
                     except Exception:
@@ -65,6 +124,14 @@ class RunPipelineUseCase:
                         lang=raw.lang or "en",
                     ))
 
+                    await _emit(on_event, {
+                        "type": "progress",
+                        "phase": "ANALYZE",
+                        "symbol": symbol,
+                        "at": _now(),
+                        "message": f"{name}({symbol}) AI 분석 중…",
+                    })
+
                     analysis = await self._analysis_usecase.execute(normalized.id)
 
                     if best_analysis is None or analysis.confidence > best_analysis.confidence:
@@ -72,21 +139,46 @@ class RunPipelineUseCase:
 
                 except Exception as e:
                     logger.warning(f"[Pipeline] {symbol} 기사 분석 실패: {e}")
+                    await _emit(on_event, {
+                        "type": "error",
+                        "phase": "ANALYZE",
+                        "symbol": symbol,
+                        "at": _now(),
+                        "message": f"{name}({symbol}) 분석 오류: {e}",
+                    })
                     continue
 
             if best_analysis:
+                tags = [t.label for t in best_analysis.tags]
                 summary = StockSummaryResponse(
                     symbol=symbol,
                     name=name,
                     summary=best_analysis.summary,
-                    tags=[t.label for t in best_analysis.tags],
+                    tags=tags,
                     sentiment=best_analysis.sentiment,
                     sentiment_score=best_analysis.sentiment_score,
                     confidence=best_analysis.confidence,
                 )
                 summaries.append(summary)
+                logs.append(AnalysisLogResponse(
+                    analyzed_at=datetime.now(),
+                    symbol=symbol,
+                    name=name,
+                    summary=best_analysis.summary,
+                    tags=tags,
+                    sentiment=best_analysis.sentiment,
+                    sentiment_score=best_analysis.sentiment_score,
+                    confidence=best_analysis.confidence,
+                ))
                 results.append({"symbol": symbol, "skipped": False, "analysis_count": 1})
+                await _emit(on_event, {
+                    "type": "result",
+                    "phase": "ANALYZE",
+                    "symbol": symbol,
+                    "at": _now(),
+                    "message": f"{name}({symbol}) 분석 완료 — 감성: {best_analysis.sentiment}",
+                })
             else:
                 results.append({"symbol": symbol, "skipped": True, "reason": "분석 실패"})
 
-        return {"message": "파이프라인 완료", "processed": results, "summaries": summaries}
+        return {"message": "파이프라인 완료", "processed": results, "summaries": summaries, "logs": logs}
