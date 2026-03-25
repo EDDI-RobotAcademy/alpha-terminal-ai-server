@@ -18,7 +18,7 @@ _KR_CODE = re.compile(r"^\d{6}$")
 class FinnhubCollectorAdapter(CollectorPort):
     API_URL = "https://finnhub.io/api/v1/company-news"
 
-    def collect(self, symbol: str) -> List[RawArticle]:
+    def collect(self, symbol: str, stock_name: str = "", corp_code: str = "") -> List[RawArticle]:
         if _KR_CODE.match(symbol):
             return []
 

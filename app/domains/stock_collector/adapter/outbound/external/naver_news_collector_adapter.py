@@ -45,7 +45,7 @@ def _clean(text: str) -> str:
 class NaverNewsCollectorAdapter(CollectorPort):
     BASE_URL = "https://search.naver.com/search.naver"
 
-    def collect(self, symbol: str) -> List[RawArticle]:
+    def collect(self, symbol: str, stock_name: str = "", corp_code: str = "") -> List[RawArticle]:
         if not _KR_CODE.match(symbol):
             return []
 
