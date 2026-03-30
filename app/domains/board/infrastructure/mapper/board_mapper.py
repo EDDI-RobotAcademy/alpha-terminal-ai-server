@@ -10,6 +10,7 @@ class BoardMapper:
             title=orm.title,
             content=orm.content,
             account_id=orm.account_id,
+            shared_card_id=getattr(orm, "shared_card_id", None),
             created_at=orm.created_at,
             updated_at=orm.updated_at,
         )
@@ -20,4 +21,5 @@ class BoardMapper:
             title=entity.title,
             content=entity.content,
             account_id=entity.account_id,
+            shared_card_id=entity.shared_card_id,
         )

@@ -8,6 +8,7 @@ class Board:
     title: str
     content: str
     account_id: int
+    shared_card_id: Optional[int] = None
     id: Optional[int] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)

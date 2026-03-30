@@ -25,4 +25,5 @@ class UpdateBoardUseCase:
             nickname=nickname,
             created_at=board.created_at,
             updated_at=board.updated_at,
+            shared_card_id=board.shared_card_id,
         )
