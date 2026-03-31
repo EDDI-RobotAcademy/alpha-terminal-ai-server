@@ -58,4 +58,4 @@ async def ask_market_analysis(
     qa = LangChainQAAdapter(api_key=settings.openai_api_key, model=settings.openai_model)
     usecase = AnalyzeMarketQueryUseCase(repository, qa)
     answer = usecase.execute(account_id=aid, question=request.question)
-    return AnalysisAnswerResponse(answer=answer.answer, in_scope=answer.in_scope)
+    return AnalysisAnswerResponse(question=request.question, answer=answer.answer, in_scope=answer.in_scope)
