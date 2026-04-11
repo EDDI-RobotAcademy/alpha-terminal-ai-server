@@ -42,6 +42,8 @@ from app.domains.card_share.infrastructure.orm.card_like_orm import CardLikeORM 
 from app.domains.card_share.infrastructure.orm.card_comment_orm import CardCommentORM  # noqa: F401
 from app.domains.stock_theme.adapter.inbound.api.stock_theme_router import router as stock_theme_router
 from app.domains.stock_theme.infrastructure.orm.stock_theme_orm import StockThemeORM  # noqa: F401
+from app.domains.user_profile.infrastructure.orm.user_profile_orm import UserProfileORM  # noqa: F401
+from app.domains.user_profile.infrastructure.orm.user_interaction_orm import UserInteractionORM  # noqa: F401
 from app.domains.market_analysis.adapter.inbound.api.market_analysis_router import router as market_analysis_router
 from app.infrastructure.config.settings import Settings, get_settings
 from app.infrastructure.database.session import Base, engine
