@@ -59,6 +59,7 @@ from app.infrastructure.database.session import Base, engine
 from app.infrastructure.database.pg_session import PgBase, pg_engine, check_pg_health
 from app.infrastructure.scheduler.pipeline_scheduler import start_scheduler, stop_scheduler
 from app.infrastructure.scheduler.profile_update_scheduler import start_profile_scheduler, stop_profile_scheduler
+from app.infrastructure.scheduler.proactive_recommendation_scheduler import start_proactive_recommendation_scheduler, stop_proactive_recommendation_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -166,9 +167,11 @@ async def lifespan(fastapi_app: FastAPI):
     from app.domains.pipeline.adapter.inbound.api.pipeline_router import run_pipeline_job
     start_scheduler(run_pipeline_job)
     start_profile_scheduler()
+    start_proactive_recommendation_scheduler()
     yield
     stop_scheduler()
     stop_profile_scheduler()
+    stop_proactive_recommendation_scheduler()
 
 
 app = FastAPI(debug=settings.debug, lifespan=lifespan)
