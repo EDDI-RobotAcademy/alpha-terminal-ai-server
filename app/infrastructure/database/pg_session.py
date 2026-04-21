@@ -5,10 +5,11 @@
 """
 import logging
 from contextlib import contextmanager
+from typing import Iterator
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
 
 from app.infrastructure.config.settings import get_settings
 
@@ -53,7 +54,7 @@ def get_pg_db():
 
 
 @contextmanager
-def pg_session_scope():
+def pg_session_scope() -> Iterator[Session]:
     """FastAPI 의존성 밖에서 PostgreSQL 세션을 일관되게 열고 닫기 위한 유틸."""
     db = PgSessionLocal()
     try:
