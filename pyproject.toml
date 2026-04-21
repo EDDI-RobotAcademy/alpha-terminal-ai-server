@@ -1,0 +1,22 @@
+[tool.pyright]
+# 단계적 strict 정책:
+# - 우선 `basic` 레벨로 시작해 신규 코드에 대한 명백한 오류만 잡는다.
+# - 이후 파일·모듈 단위로 `strict` 리스트에 옮겨 서서히 범위를 확장한다.
+include = ["app"]
+exclude = [
+    "**/__pycache__",
+    "**/.mypy_cache",
+    "**/.pytest_cache",
+    "alembic_mysql",
+    "tests",
+]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+reportMissingImports = "warning"
+reportMissingTypeStubs = false
+reportPrivateImportUsage = "warning"
+
+# 점진적으로 strict 리스트에 추가할 모듈 예시(현재 비어 있음).
+# strict = [
+#     "app/domains/pipeline/application/response/run_pipeline_result.py",
+# ]
