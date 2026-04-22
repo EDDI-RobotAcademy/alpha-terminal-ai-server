@@ -65,3 +65,14 @@ class MarketVideoRepositoryImpl(MarketVideoRepositoryPort):
         total = query.count()
         orms = query.offset((page - 1) * page_size).limit(page_size).all()
         return [MarketVideoMapper.to_entity(orm) for orm in orms], total
+
+    def find_latest_published_at(self, stock_name: str) -> Optional[datetime]:
+        """BL-BE-89: stale 판단용 — 해당 종목 영상 중 최신 published_at."""
+        row = (
+            self._db.query(MarketVideoORM.published_at)
+            .filter(MarketVideoORM.title.contains(stock_name))
+            .order_by(MarketVideoORM.published_at.desc())
+            .limit(1)
+            .first()
+        )
+        return row[0] if row else None
