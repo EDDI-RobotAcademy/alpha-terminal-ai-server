@@ -9,6 +9,10 @@ class RecordEventUseCase:
         self._db = db
 
     def execute(self, account_id: int, event_type: str, campaign: str | None = None) -> None:
-        event = EventORM(account_id=account_id, event_type=event_type, campaign=campaign)
-        self._db.add(event)
-        self._db.commit()
+        try:
+            event = EventORM(account_id=account_id, event_type=event_type, campaign=campaign)
+            self._db.add(event)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
