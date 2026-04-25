@@ -1,7 +1,7 @@
 """관리자 대시보드 통계 UseCase."""
 from datetime import datetime, timedelta, date
 
-from sqlalchemy import func, distinct, case
+from sqlalchemy import func, distinct
 from sqlalchemy.orm import Session
 
 from app.domains.account.infrastructure.orm.account_orm import AccountORM
@@ -60,12 +60,11 @@ class GetAdminDashboardStatsUseCase:
             target_start = cohort_start + timedelta(days=day)
             target_end = target_start + timedelta(days=1)
 
-            cohort_ids = (
+            cohort_query = (
                 self._db.query(AccountORM.id)
                 .filter(AccountORM.created_at >= cohort_start, AccountORM.created_at < cohort_end)
-                .subquery()
             )
-            cohort_total = self._db.query(func.count()).select_from(cohort_ids).scalar() or 0
+            cohort_total = cohort_query.count()
             if cohort_total == 0:
                 points.append(RetentionPoint(day=day, rate=0.0))
                 continue
@@ -73,7 +72,7 @@ class GetAdminDashboardStatsUseCase:
             returned = (
                 self._db.query(func.count(distinct(EventORM.account_id)))
                 .filter(
-                    EventORM.account_id.in_(self._db.query(cohort_ids)),
+                    EventORM.account_id.in_(cohort_query),
                     EventORM.event_type == "app_open",
                     EventORM.occurred_at >= target_start,
                     EventORM.occurred_at < target_end,
