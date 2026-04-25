@@ -51,12 +51,15 @@ from app.domains.market_analysis.adapter.inbound.api.market_analysis_router impo
 from app.domains.investment.adapter.inbound.api.investment_router import router as investment_router
 from app.domains.admin.adapter.inbound.api.admin_router import router as admin_router
 from app.domains.notification.adapter.inbound.api.notification_router import router as notification_router
+from app.domains.analytics.adapter.inbound.api.analytics_router import router as analytics_router
+from app.domains.analytics.infrastructure.orm.event_orm import EventORM  # noqa: F401
 from app.domains.notification.infrastructure.orm.notification_orm import NotificationORM  # noqa: F401
 from app.domains.investment.infrastructure.orm.investment_youtube_log_orm import InvestmentYouTubeLogORM  # noqa: F401
 from app.domains.investment.infrastructure.orm.investment_youtube_video_orm import InvestmentYouTubeVideoORM  # noqa: F401
 from app.domains.investment.infrastructure.orm.investment_youtube_comment_orm import InvestmentYouTubeCommentORM  # noqa: F401
 from app.domains.investment.infrastructure.orm.analysis_cache_orm import AnalysisCacheORM  # noqa: F401
 from app.infrastructure.config.settings import Settings, get_settings
+from app.infrastructure.database.session import Base, engine
 from app.infrastructure.database.pg_session import PgBase, pg_engine, check_pg_health
 from app.infrastructure.external.serp_client import SerpClient
 from app.infrastructure.scheduler.pipeline_scheduler import start_scheduler, stop_scheduler
@@ -70,6 +73,12 @@ settings: Settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
+    # MySQL 스키마 자동 생성 (IF NOT EXISTS — 기존 테이블 무해)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        logger.exception("MySQL schema init failed — check MYSQL_* env vars.")
+
     # BL-BE-84: PG create_all 을 lifespan startup 으로 이동 (모듈 레벨 실행 제거)
     # TODO: PG Alembic cutover 완료 후 아래 create_all 블록 제거하고 alembic upgrade head 로 대체
     try:
@@ -81,6 +90,44 @@ async def lifespan(fastapi_app: FastAPI):
         )
 
     check_pg_health()
+
+    # 종목 데이터 자동 초기화: stocks 테이블이 비어있으면 DART + KRX sync 실행
+    _uv_logger = logging.getLogger("uvicorn")
+    try:
+        from app.infrastructure.database.session import SessionLocal
+        from app.domains.stock.infrastructure.orm.stock_orm import StockORM as _StockORM
+        from app.domains.stock.adapter.outbound.persistence.stock_repository_impl import StockRepositoryImpl as _StockRepo
+        from app.domains.stock.adapter.outbound.external.dart_corp_code_adapter import DartCorpCodeAdapter as _DartAdapter
+        from app.domains.stock.adapter.outbound.external.krx_market_adapter import KrxMarketAdapter as _KrxAdapter
+        from app.domains.stock.application.usecase.sync_corp_code_usecase import SyncCorpCodeUseCase as _SyncCorp
+        from app.domains.stock.application.usecase.sync_market_usecase import SyncMarketUseCase as _SyncMarket
+        import asyncio as _asyncio
+
+        _db = SessionLocal()
+        try:
+            _count = _db.query(_StockORM).count()
+        finally:
+            _db.close()
+
+        if _count == 0:
+            _uv_logger.info("[startup] stocks 테이블이 비어있음 — DART/KRX 자동 sync 시작")
+            _db = SessionLocal()
+            try:
+                _synced = await _asyncio.to_thread(_SyncCorp(_DartAdapter(), _StockRepo(_db)).execute)
+            finally:
+                _db.close()
+            _uv_logger.info(f"[startup] DART sync 완료: {_synced}건")
+            _db = SessionLocal()
+            try:
+                _updated = await _asyncio.to_thread(_SyncMarket(_KrxAdapter(), _StockRepo(_db)).execute)
+            finally:
+                _db.close()
+            _uv_logger.info(f"[startup] KRX sync 완료: {_updated}건")
+        else:
+            _uv_logger.info(f"[startup] stocks {_count}건 확인 — sync 생략")
+    except Exception:
+        _uv_logger.exception("[startup] 종목 자동 sync 실패 — 수동으로 /stocks/sync 호출 필요")
+
     from app.domains.pipeline.adapter.inbound.api.pipeline_router import run_pipeline_job
     start_scheduler(run_pipeline_job)
     start_profile_scheduler()
@@ -129,6 +176,7 @@ app.include_router(market_analysis_router)
 app.include_router(investment_router)
 app.include_router(admin_router)
 app.include_router(notification_router)
+app.include_router(analytics_router)
 app.include_router(user_profile_router)
 
 
