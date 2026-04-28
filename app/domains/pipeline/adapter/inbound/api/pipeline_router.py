@@ -166,6 +166,14 @@ async def get_progress(account_id: Optional[str] = Cookie(default=None)):
     return {"messages": messages, "done": done}
 
 
+def _current_watchlist_symbols(db: Session, account_id: Optional[int]) -> Optional[set[str]]:
+    """account_id가 있을 때만 현재 관심종목 symbol 집합을 반환한다."""
+    if account_id is None:
+        return None
+    items = WatchlistRepositoryImpl(db).find_all(account_id=account_id)
+    return {item.symbol.upper() for item in items}
+
+
 @router.get("/summaries", response_model=List[StockSummaryResponse])
 async def get_summaries(
     db: Session = Depends(get_db),
@@ -174,6 +182,9 @@ async def get_summaries(
     parsed_account_id = int(account_id) if account_id else None
     log_repo = AnalysisLogRepositoryImpl(db)
     logs = log_repo.find_latest_per_symbol(["NEWS"], account_id=parsed_account_id)
+    symbols = _current_watchlist_symbols(db, parsed_account_id)
+    if symbols is not None:
+        logs = [log for log in logs if log.symbol.upper() in symbols]
     return [_log_to_summary(log) for log in logs]
 
 
@@ -185,6 +196,9 @@ async def get_report_summaries(
     parsed_account_id = int(account_id) if account_id else None
     log_repo = AnalysisLogRepositoryImpl(db)
     logs = log_repo.find_latest_per_symbol(["DISCLOSURE", "REPORT"], account_id=parsed_account_id)
+    symbols = _current_watchlist_symbols(db, parsed_account_id)
+    if symbols is not None:
+        logs = [log for log in logs if log.symbol.upper() in symbols]
     return [_log_to_summary(log) for log in logs]
 
 
@@ -195,7 +209,11 @@ async def get_analysis_logs(
 ):
     parsed_account_id = int(account_id) if account_id else None
     log_repo = AnalysisLogRepositoryImpl(db)
-    return log_repo.find_recent(limit=50, account_id=parsed_account_id)
+    logs = log_repo.find_recent(limit=50, account_id=parsed_account_id)
+    symbols = _current_watchlist_symbols(db, parsed_account_id)
+    if symbols is not None:
+        logs = [log for log in logs if log.symbol.upper() in symbols]
+    return logs
 
 
 async def run_pipeline_job():

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.domains.auth.adapter.outbound.in_memory.redis_session_adapter import RedisSessionAdapter
+from app.domains.pipeline.adapter.outbound.persistence.analysis_log_repository_impl import AnalysisLogRepositoryImpl
 from app.domains.watchlist.adapter.outbound.persistence.watchlist_repository_impl import WatchlistRepositoryImpl
 from app.domains.watchlist.application.request.add_watchlist_request import AddWatchlistRequest
 from app.domains.watchlist.infrastructure.orm.watchlist_item_orm import WatchlistItemORM
@@ -90,10 +91,13 @@ async def remove_watchlist(
     if orm.account_id != aid:
         raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
 
-    repository = WatchlistRepositoryImpl(db)
+    symbol = orm.symbol
 
+    repository = WatchlistRepositoryImpl(db)
     usecase = RemoveWatchlistUseCase(repository)
     try:
         usecase.execute(item_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    AnalysisLogRepositoryImpl(db).delete_by_symbol_and_account(symbol, aid)
