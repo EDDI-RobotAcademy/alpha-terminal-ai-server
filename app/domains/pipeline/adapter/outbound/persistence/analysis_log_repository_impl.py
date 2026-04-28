@@ -123,6 +123,17 @@ class AnalysisLogRepositoryImpl(AnalysisLogRepositoryPort):
             for orm in orms
         ]
 
+    def delete_by_symbol_and_account(self, symbol: str, account_id: int) -> None:
+        try:
+            self._db.query(AnalysisLogORM).filter(
+                AnalysisLogORM.symbol == symbol.upper(),
+                AnalysisLogORM.account_id == account_id,
+            ).delete(synchronize_session=False)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
     def find_recent(self, limit: int = 50, account_id: Optional[int] = None) -> List[AnalysisLogResponse]:
         query = self._db.query(AnalysisLogORM)
         if account_id is not None:

@@ -20,3 +20,7 @@ class AnalysisLogRepositoryPort(ABC):
     @abstractmethod
     def find_by_symbol(self, symbol: str, limit: int = 20) -> List[AnalysisLogResponse]:
         pass
+
+    @abstractmethod
+    def delete_by_symbol_and_account(self, symbol: str, account_id: int) -> None:
+        pass
